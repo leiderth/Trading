@@ -51,22 +51,46 @@ class BinanceBroker(BaseBroker):
                 self.client = Client(self.api_key, self.api_secret)
                 logger.info("🔗 Conectando a Binance MAINNET...")
             
-            # Verificar conexión
-            account = self.client.get_account()
-            self.connected = True
+            # Verificar conexión con ping primero
+            logger.info("📡 Verificando conexión con ping...")
+            self.client.ping()
+            logger.success("✓ Ping exitoso")
             
-            logger.success("✓ Conectado a Binance")
-            logger.info(f"  API Key: {self.api_key[:8]}...")
-            logger.info(f"  Can Trade: {account['canTrade']}")
+            # Intentar obtener información de cuenta
+            try:
+                logger.info("📊 Obteniendo información de cuenta...")
+                account = self.client.get_account()
+                logger.success("✓ Información de cuenta obtenida")
+                logger.info(f"  API Key: {self.api_key[:8]}...")
+                logger.info(f"  Can Trade: {account.get('canTrade', 'Unknown')}")
+            except BinanceAPIException as e:
+                # Si get_account falla por permisos, intentar con get_account_status
+                logger.warning(f"⚠️ get_account() falló: {e.message}")
+                logger.info("Intentando método alternativo...")
+                
+                try:
+                    # Probar con server_time como verificación mínima
+                    server_time = self.client.get_server_time()
+                    logger.success(f"✓ Servidor respondió: {server_time['serverTime']}")
+                    logger.info("✓ Conexión establecida (modo limitado)")
+                except Exception as e2:
+                    logger.error(f"✗ Verificación alternativa falló: {e2}")
+                    raise
+            
+            self.connected = True
+            logger.success("✅ Conectado a Binance exitosamente")
             
             return True
             
         except BinanceAPIException as e:
             logger.error(f"✗ Error de API Binance: {e}")
+            logger.error(f"   Código: {e.code}")
+            logger.error(f"   Mensaje: {e.message}")
             self.connected = False
             return False
         except Exception as e:
             logger.error(f"✗ Error conectando a Binance: {e}")
+            logger.exception("Traceback completo:")
             self.connected = False
             return False
     

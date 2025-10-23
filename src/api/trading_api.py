@@ -79,6 +79,16 @@ async def root():
     }
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "system_initialized": trading_system is not None
+    }
+
+
 @app.get("/api/system/status")
 async def get_system_status():
     """Obtiene estado del sistema"""
@@ -171,35 +181,63 @@ async def stop_system():
 @app.post("/api/broker/connect")
 async def connect_broker(config: BrokerConfig):
     """Conecta con un broker"""
-    if not trading_system:
-        raise HTTPException(status_code=400, detail="Sistema no inicializado")
-    
     try:
-        # Cambiar broker
-        from ..brokers.quotex_broker import QuotexBroker
+        logger.info(f"🔌 Intentando conectar a {config.broker_type}")
+        logger.info(f"Credenciales: {list(config.credentials.keys())}")
+        logger.info(f"Demo mode: {config.demo_mode}")
+        
+        # Importar brokers
         from ..brokers.binance_broker import BinanceBroker
         from ..brokers.binance_futures_broker import BinanceFuturesBroker
         
-        if config.broker_type == 'quotex':
-            broker = QuotexBroker(config.credentials)
-        elif config.broker_type == 'binance':
-            broker = BinanceBroker(config.credentials)
+        # Crear instancia del broker
+        if config.broker_type == 'binance':
+            broker_config = {
+                'api_key': config.credentials.get('api_key'),
+                'api_secret': config.credentials.get('api_secret'),
+                'testnet': config.credentials.get('testnet', False)
+            }
+            broker = BinanceBroker(broker_config)
         elif config.broker_type == 'binance_futures':
-            broker = BinanceFuturesBroker(config.credentials)
+            broker_config = {
+                'api_key': config.credentials.get('api_key'),
+                'api_secret': config.credentials.get('api_secret'),
+                'testnet': config.credentials.get('testnet', False)
+            }
+            broker = BinanceFuturesBroker(broker_config)
         else:
-            raise HTTPException(status_code=400, detail="Broker no soportado. Solo Quotex, Binance y Binance Futures están disponibles.")
+            raise HTTPException(status_code=400, detail=f"Broker '{config.broker_type}' no soportado")
         
+        logger.info(f"Broker creado, intentando conectar...")
+        
+        # Conectar (método async)
         connected = await broker.connect()
         
         if connected:
-            trading_system.broker = broker
-            return {"status": "success", "message": f"Conectado a {config.broker_type}"}
-        else:
-            raise HTTPException(status_code=500, detail="Error conectando al broker")
+            logger.success(f"✅ Conectado exitosamente a {config.broker_type}")
             
+            # Si hay trading_system, asignar broker
+            global trading_system
+            if trading_system:
+                trading_system.broker = broker
+                logger.info("Broker asignado al trading system")
+            
+            return {
+                "success": True,
+                "status": "success",
+                "message": f"Conectado a {config.broker_type}",
+                "broker": config.broker_type
+            }
+        else:
+            logger.error("❌ Broker retornó False al conectar")
+            raise HTTPException(status_code=500, detail="El broker no pudo establecer conexión")
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error conectando broker: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Error conectando broker: {e}")
+        logger.exception("Traceback completo:")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.get("/api/broker/account")
