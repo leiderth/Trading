@@ -178,13 +178,16 @@ async def connect_broker(config: BrokerConfig):
         # Cambiar broker
         from ..brokers.quotex_broker import QuotexBroker
         from ..brokers.binance_broker import BinanceBroker
+        from ..brokers.binance_futures_broker import BinanceFuturesBroker
         
         if config.broker_type == 'quotex':
             broker = QuotexBroker(config.credentials)
         elif config.broker_type == 'binance':
             broker = BinanceBroker(config.credentials)
+        elif config.broker_type == 'binance_futures':
+            broker = BinanceFuturesBroker(config.credentials)
         else:
-            raise HTTPException(status_code=400, detail="Broker no soportado. Solo Quotex y Binance están disponibles.")
+            raise HTTPException(status_code=400, detail="Broker no soportado. Solo Quotex, Binance y Binance Futures están disponibles.")
         
         connected = await broker.connect()
         

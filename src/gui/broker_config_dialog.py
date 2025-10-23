@@ -4,7 +4,7 @@ import requests
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QLineEdit, QPushButton, QCheckBox,
-    QGroupBox, QFormLayout, QMessageBox
+    QGroupBox, QFormLayout, QMessageBox, QSpinBox
 )
 
 class BrokerConfigDialog(QDialog):
@@ -24,7 +24,7 @@ class BrokerConfigDialog(QDialog):
         broker_layout = QHBoxLayout()
         broker_layout.addWidget(QLabel("Broker:"))
         self.broker_combo = QComboBox()
-        self.broker_combo.addItems(["Quotex (Simulacion)", "Binance (Crypto)"])
+        self.broker_combo.addItems(["Quotex (Simulacion)", "Binance (Crypto)", "Binance Futures (Apalancamiento)"])
         self.broker_combo.currentIndexChanged.connect(self.on_broker_changed)
         broker_layout.addWidget(self.broker_combo)
         layout.addLayout(broker_layout)
@@ -56,6 +56,36 @@ class BrokerConfigDialog(QDialog):
         layout.addWidget(self.binance_group)
         self.binance_group.hide()
         
+        # Grupo Binance Futures
+        self.futures_group = QGroupBox("Configuracion Binance Futures")
+        futures_layout = QFormLayout(self.futures_group)
+        self.futures_api_key = QLineEdit()
+        self.futures_api_secret = QLineEdit()
+        self.futures_api_secret.setEchoMode(QLineEdit.EchoMode.Password)
+        self.futures_testnet = QCheckBox("Usar Testnet (demo.binance.com)")
+        self.futures_testnet.setChecked(True)
+        self.futures_leverage = QSpinBox()
+        self.futures_leverage.setRange(1, 125)
+        self.futures_leverage.setValue(10)
+        self.futures_leverage.setSuffix("x")
+        futures_layout.addRow("API Key:", self.futures_api_key)
+        futures_layout.addRow("API Secret:", self.futures_api_secret)
+        futures_layout.addRow("", self.futures_testnet)
+        futures_layout.addRow("Apalancamiento:", self.futures_leverage)
+        
+        # Info de apalancamiento
+        info_label = QLabel(
+            "⚠️ Apalancamiento:\n"
+            "• 1x-5x: Conservador\n"
+            "• 5x-10x: Moderado\n"
+            "• 10x-20x: Agresivo\n"
+            "• 20x+: Muy riesgoso"
+        )
+        info_label.setStyleSheet("color: #ff9800; font-size: 10px;")
+        futures_layout.addRow("", info_label)
+        
+        layout.addWidget(self.futures_group)
+        self.futures_group.hide()
         
         # Botones
         buttons_layout = QHBoxLayout()
@@ -71,12 +101,15 @@ class BrokerConfigDialog(QDialog):
         # Ocultar todos
         self.quotex_group.hide()
         self.binance_group.hide()
+        self.futures_group.hide()
         
         # Mostrar el seleccionado
         if index == 0:  # Quotex
             self.quotex_group.show()
         elif index == 1:  # Binance
             self.binance_group.show()
+        elif index == 2:  # Binance Futures
+            self.futures_group.show()
     
     def connect_broker(self):
         try:
@@ -100,6 +133,15 @@ class BrokerConfigDialog(QDialog):
                     "demo_mode": self.binance_testnet.isChecked()
                 }
                 self.selected_broker = "Binance"
+            elif broker_index == 2:  # Binance Futures
+                broker_type = "binance_futures"
+                credentials = {
+                    "api_key": self.futures_api_key.text(),
+                    "api_secret": self.futures_api_secret.text(),
+                    "testnet": self.futures_testnet.isChecked(),
+                    "leverage": self.futures_leverage.value()
+                }
+                self.selected_broker = "Binance Futures"
             else:
                 QMessageBox.warning(self, "Advertencia", "Broker no soportado")
                 return
