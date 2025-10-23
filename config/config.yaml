@@ -1,0 +1,288 @@
+# ============================================
+# CONFIGURACIÓN PRINCIPAL DEL SISTEMA
+# ============================================
+
+system:
+  name: "AI Trading System v1.0"
+  version: "1.0.0"
+  environment: "development"  # development, staging, production
+
+trading:
+  # Gestión de Riesgo
+  risk_management:
+    max_risk_per_trade: 0.02  # 2%
+    max_drawdown: 0.15  # 15%
+    max_positions: 3
+    position_sizing_method: "kelly_modified"  # fixed, kelly, kelly_modified
+    
+  # Stop Loss & Take Profit
+  stop_loss:
+    method: "atr"  # atr, fixed, percentage
+    atr_multiplier: 1.5
+    trailing_enabled: true
+    trailing_atr_multiplier: 1.5
+    
+  take_profit:
+    risk_reward_ratio: 2.0
+    partial_exits:
+      - level: 0.382  # Fibonacci
+        percentage: 0.25
+      - level: 0.618
+        percentage: 0.50
+      - level: 1.0
+        percentage: 1.0
+        
+  # Límites de Seguridad
+  safety_limits:
+    max_consecutive_losses: 3
+    reduce_size_after_losses: true
+    reduction_factor: 0.5
+    pause_after_drawdown: 0.10
+    daily_loss_limit: 0.05  # 5% pérdida diaria máxima
+
+# Configuración de IA
+ai:
+  # LSTM Predictor
+  lstm:
+    lookback_period: 100
+    forecast_horizon: 10
+    hidden_units: [128, 64]
+    dropout: 0.2
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 32
+    
+  # Reinforcement Learning (PPO)
+  rl:
+    algorithm: "PPO"  # PPO, SAC, A2C
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_epsilon: 0.2
+    entropy_coefficient: 0.01
+    value_coefficient: 0.5
+    max_grad_norm: 0.5
+    n_steps: 2048
+    batch_size: 64
+    n_epochs: 10
+    
+  # Estado (State Space)
+  state_features:
+    - ohlcv  # Open, High, Low, Close, Volume
+    - technical_indicators
+    - position_info
+    - pnl_info
+    - volatility
+    - time_features
+    - market_regime
+    
+  # Acciones (Action Space)
+  actions:
+    - HOLD
+    - BUY_25
+    - BUY_50
+    - BUY_75
+    - BUY_100
+    - SELL_25
+    - SELL_50
+    - SELL_75
+    - SELL_100
+    - CLOSE
+    
+  # Función de Recompensa
+  reward_function:
+    profit_multiplier: 10
+    loss_multiplier: -15
+    drawdown_penalty: -5
+    sharpe_bonus: 3
+    transaction_cost_penalty: -1
+    
+  # Entrenamiento Continuo
+  continuous_learning:
+    enabled: true
+    retrain_every_n_trades: 50
+    min_experience_buffer: 1000
+    save_best_model: true
+    
+  # Confianza Mínima
+  confidence:
+    min_threshold: 0.70  # 70%
+    lstm_weight: 0.4
+    rl_weight: 0.6
+
+# Indicadores Técnicos
+technical_indicators:
+  trend:
+    - name: "EMA"
+      periods: [20, 50, 200]
+    - name: "MACD"
+      fast: 12
+      slow: 26
+      signal: 9
+    - name: "ADX"
+      period: 14
+      
+  momentum:
+    - name: "RSI"
+      period: 14
+    - name: "Stochastic"
+      k_period: 14
+      d_period: 3
+    - name: "CCI"
+      period: 20
+      
+  volatility:
+    - name: "ATR"
+      period: 14
+    - name: "Bollinger_Bands"
+      period: 20
+      std_dev: 2
+    - name: "Keltner_Channels"
+      period: 20
+      atr_multiplier: 2
+      
+  volume:
+    - name: "Volume_SMA"
+      period: 20
+    - name: "OBV"
+    - name: "VWAP"
+    
+  support_resistance:
+    - name: "Pivot_Points"
+      method: "standard"  # standard, fibonacci, camarilla
+    - name: "Fibonacci_Retracement"
+      lookback: 100
+
+# Detección de Patrones
+patterns:
+  candlestick:
+    - "Doji"
+    - "Hammer"
+    - "Shooting_Star"
+    - "Engulfing"
+    - "Morning_Star"
+    - "Evening_Star"
+    
+  chart:
+    - "Head_and_Shoulders"
+    - "Double_Top"
+    - "Double_Bottom"
+    - "Triangle"
+    - "Flag"
+    - "Wedge"
+
+# Timeframes
+timeframes:
+  primary: "5m"
+  secondary:
+    - "1m"
+    - "15m"
+    - "1h"
+    - "4h"
+    - "1D"
+    
+# Símbolos
+symbols:
+  forex:
+    - "EUR/USD"
+    - "GBP/USD"
+    - "USD/JPY"
+    - "AUD/USD"
+  crypto:
+    - "BTC/USD"
+    - "ETH/USD"
+    - "BNB/USD"
+  indices:
+    - "US30"
+    - "SPX500"
+    - "NAS100"
+
+# Horarios de Trading
+trading_hours:
+  enabled: true
+  timezone: "UTC"
+  sessions:
+    - name: "London"
+      start: "08:00"
+      end: "16:00"
+      active: true
+    - name: "New York"
+      start: "13:00"
+      end: "21:00"
+      active: true
+  avoid_news: true
+  news_buffer_minutes: 30
+
+# Base de Datos
+database:
+  timeseries:
+    type: "postgresql"  # postgresql, influxdb, timescaledb
+    retention_days: 365
+    
+  trades:
+    type: "postgresql"
+    backup_enabled: true
+    backup_frequency: "daily"
+    
+  cache:
+    type: "redis"
+    ttl_seconds: 300
+
+# Monitoreo y Alertas
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    
+  grafana:
+    enabled: true
+    port: 3000
+    
+  telegram:
+    enabled: true
+    alerts:
+      - "trade_opened"
+      - "trade_closed"
+      - "drawdown_warning"
+      - "system_error"
+      - "daily_summary"
+      
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "json"  # json, text
+  outputs:
+    - console
+    - file
+  file:
+    path: "logs/"
+    rotation: "daily"
+    retention_days: 30
+    max_size_mb: 100
+
+# Backtesting
+backtesting:
+  enabled: true
+  start_date: "2022-01-01"
+  end_date: "2024-12-31"
+  initial_capital: 10000
+  commission: 0.0002  # 0.02%
+  slippage: 0.0001  # 0.01%
+
+# Performance Metrics
+metrics:
+  calculate:
+    - "total_return"
+    - "sharpe_ratio"
+    - "sortino_ratio"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+    - "expectancy"
+    - "calmar_ratio"
+  benchmark: "SPY"  # Símbolo de referencia
