@@ -11,9 +11,8 @@ from loguru import logger
 import pandas as pd
 import numpy as np
 
-from ..brokers.base_broker import BaseBroker, OrderSide, OrderType
-from ..ai.advanced_predictor import AdvancedPredictor
-from ..models.rl_agent import RLAgent
+from ..brokers.base_broker import OrderSide, OrderType
+from .technical_analyzer import TechnicalAnalyzer
 
 
 class AutoTrader:
@@ -22,13 +21,13 @@ class AutoTrader:
     Analiza mercado, toma decisiones y ejecuta trades
     """
     
-    def __init__(self, broker: BaseBroker, config: Dict):
+    def __init__(self, controller, config: Dict):
         """
         Args:
-            broker: Instancia del broker (Binance)
+            controller: Instancia de TradingController (usa API REST)
             config: Configuración del bot
         """
-        self.broker = broker
+        self.controller = controller
         self.config = config
         
         # Estado del bot
@@ -49,9 +48,8 @@ class AutoTrader:
         self.daily_trades = 0
         self.max_daily_trades = config.get('max_daily_trades', 20)
         
-        # Modelos de IA
-        self.predictor = AdvancedPredictor()
-        self.rl_agent = RLAgent()
+        # Analizador técnico
+        self.analyzer = TechnicalAnalyzer()
         
         # Posiciones activas
         self.active_positions = {}
@@ -81,10 +79,10 @@ class AutoTrader:
         self.is_running = True
         self.is_paused = False
         
-        # Obtener balance inicial
-        account = await self.broker.get_account_info()
-        self.initial_balance = account.balance
-        self.current_balance = account.balance
+        # Obtener balance inicial vía API
+        balance_data = self.controller.get_balance() or {}
+        self.initial_balance = float(balance_data.get('balance', 0) or 0)
+        self.current_balance = self.initial_balance
         
         logger.info(f"💰 Balance inicial: ${self.initial_balance:,.2f}")
         
@@ -203,144 +201,28 @@ class AutoTrader:
     
     async def _analyze_with_ai(self, symbol: str, market_data: pd.DataFrame) -> Dict:
         """
-        Analiza el mercado usando modelos de IA
+        Analiza el mercado usando indicadores técnicos
         
         Returns:
             Dict con: action, confidence, reason, entry_price, stop_loss, take_profit
         """
         try:
-            # Preparar datos
-            features = self._prepare_features(market_data)
-            
-            # Predicción con Advanced Predictor
-            prediction = self.predictor.predict(features)
-            
-            # Análisis con RL Agent
-            rl_action = self.rl_agent.get_action(features)
-            
-            # Combinar señales
-            signal = self._combine_signals(prediction, rl_action, market_data)
+            # Analizar con indicadores técnicos
+            signal = self.analyzer.analyze(market_data)
             
             return signal
             
         except Exception as e:
-            logger.error(f"❌ Error en análisis IA: {e}")
+            logger.error(f"❌ Error en análisis: {e}")
             return {
                 'action': 'HOLD',
                 'confidence': 0.0,
-                'reason': f'Error: {str(e)}'
+                'reason': f'Error: {str(e)}',
+                'entry_price': market_data['close'].iloc[-1],
+                'stop_loss': None,
+                'take_profit': None
             }
     
-    def _prepare_features(self, market_data: pd.DataFrame) -> np.ndarray:
-        """Prepara features para los modelos de IA"""
-        df = market_data.copy()
-        
-        # Indicadores técnicos
-        # RSI
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # MACD
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['signal_line'] = df['macd'].ewm(span=9, adjust=False).mean()
-        
-        # Bollinger Bands
-        df['bb_middle'] = df['close'].rolling(window=20).mean()
-        bb_std = df['close'].rolling(window=20).std()
-        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
-        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
-        
-        # Moving Averages
-        df['sma_20'] = df['close'].rolling(window=20).mean()
-        df['sma_50'] = df['close'].rolling(window=50).mean()
-        df['ema_12'] = df['close'].ewm(span=12, adjust=False).mean()
-        
-        # Volume
-        df['volume_sma'] = df['volume'].rolling(window=20).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_sma']
-        
-        # Price changes
-        df['price_change_1'] = df['close'].pct_change(1)
-        df['price_change_5'] = df['close'].pct_change(5)
-        
-        # Seleccionar últimas features
-        features = df[[
-            'rsi', 'macd', 'signal_line',
-            'bb_upper', 'bb_lower', 'bb_middle',
-            'sma_20', 'sma_50', 'ema_12',
-            'volume_ratio', 'price_change_1', 'price_change_5'
-        ]].iloc[-1].values
-        
-        return features
-    
-    def _combine_signals(self, prediction: Dict, rl_action: int, market_data: pd.DataFrame) -> Dict:
-        """Combina señales de diferentes modelos"""
-        current_price = market_data['close'].iloc[-1]
-        
-        # Mapear acción de RL (0=HOLD, 1=BUY, 2=SELL)
-        rl_signal = ['HOLD', 'BUY', 'SELL'][rl_action]
-        
-        # Obtener señal del predictor
-        pred_signal = prediction.get('signal', 'HOLD')
-        pred_confidence = prediction.get('confidence', 0.5)
-        
-        # Combinar señales (ambos modelos deben estar de acuerdo)
-        if rl_signal == pred_signal and rl_signal != 'HOLD':
-            action = rl_signal
-            confidence = pred_confidence * 1.2  # Boost si ambos coinciden
-        elif rl_signal != 'HOLD':
-            action = rl_signal
-            confidence = pred_confidence * 0.8
-        elif pred_signal != 'HOLD':
-            action = pred_signal
-            confidence = pred_confidence * 0.8
-        else:
-            action = 'HOLD'
-            confidence = 0.0
-        
-        # Calcular stop loss y take profit
-        atr = self._calculate_atr(market_data)
-        
-        if action == 'BUY':
-            stop_loss = current_price - (atr * 2)
-            take_profit = current_price + (atr * 3)
-            reason = "Señal de compra: Modelos de IA indican tendencia alcista"
-        elif action == 'SELL':
-            stop_loss = current_price + (atr * 2)
-            take_profit = current_price - (atr * 3)
-            reason = "Señal de venta: Modelos de IA indican tendencia bajista"
-        else:
-            stop_loss = None
-            take_profit = None
-            reason = "Sin señal clara"
-        
-        return {
-            'action': action,
-            'confidence': min(confidence, 1.0),
-            'reason': reason,
-            'entry_price': current_price,
-            'stop_loss': stop_loss,
-            'take_profit': take_profit,
-            'atr': atr
-        }
-    
-    def _calculate_atr(self, market_data: pd.DataFrame, period: int = 14) -> float:
-        """Calcula Average True Range"""
-        df = market_data.copy()
-        
-        df['h-l'] = df['high'] - df['low']
-        df['h-pc'] = abs(df['high'] - df['close'].shift(1))
-        df['l-pc'] = abs(df['low'] - df['close'].shift(1))
-        
-        df['tr'] = df[['h-l', 'h-pc', 'l-pc']].max(axis=1)
-        atr = df['tr'].rolling(window=period).mean().iloc[-1]
-        
-        return atr
     
     async def _execute_trade(self, symbol: str, signal: Dict):
         """Ejecuta un trade basado en la señal"""
@@ -361,15 +243,16 @@ class AutoTrader:
             logger.info(f"   Stop Loss: ${signal['stop_loss']:.2f}")
             logger.info(f"   Take Profit: ${signal['take_profit']:.2f}")
             
-            # Ejecutar orden
-            side = OrderSide.BUY if signal['action'] == 'BUY' else OrderSide.SELL
-            
-            order = await self.broker.place_order(
+            # Ejecutar orden vía API Controller
+            side_text = 'buy' if signal['action'] == 'BUY' else 'sell'
+            result = self.controller.execute_trade(
                 symbol=symbol,
-                side=side,
-                order_type=OrderType.MARKET,
-                quantity=position_size
+                side=side_text,
+                amount=position_size,
+                stop_loss=signal.get('stop_loss'),
+                take_profit=signal.get('take_profit')
             )
+            order = result if result and result.get('success') else None
             
             if order:
                 # Guardar posición
@@ -432,9 +315,24 @@ class AutoTrader:
             try:
                 position = self.active_positions[symbol]
                 
-                # Obtener precio actual
-                ticker = await self.broker.get_ticker(symbol)
-                current_price = ticker['last']
+                # Obtener precio actual desde mercado (fallback: último cierre)
+                md = self.controller.get_market_data(symbol) or {}
+                current_price = None
+                if isinstance(md, dict):
+                    current_price = md.get('last') or md.get('price')
+                    candles = md.get('candles') or md.get('klines') or md.get('data')
+                    if current_price is None and candles:
+                        try:
+                            last = candles[-1]
+                            if isinstance(last, dict):
+                                current_price = float(last.get('close'))
+                            elif isinstance(last, (list, tuple)) and len(last) >= 5:
+                                current_price = float(last[4])  # close index típico
+                        except Exception:
+                            pass
+                if current_price is None:
+                    logger.warning(f"No se pudo obtener precio actual para {symbol}; skip gestión")
+                    continue
                 
                 # Verificar stop loss
                 if self._check_stop_loss(position, current_price):
@@ -497,20 +395,28 @@ class AutoTrader:
             
             logger.info(f"🔒 Cerrando posición {symbol} - Razón: {reason}")
             
-            # Ejecutar orden de cierre (opuesta a la entrada)
-            close_side = OrderSide.SELL if signal['action'] == 'BUY' else OrderSide.BUY
-            
-            order = await self.broker.place_order(
+            # Ejecutar orden de cierre vía API (opuesta a la entrada)
+            close_side = 'sell' if signal['action'] == 'BUY' else 'buy'
+            order = self.controller.execute_trade(
                 symbol=symbol,
                 side=close_side,
-                order_type=OrderType.MARKET,
-                quantity=position['quantity']
+                amount=position['quantity']
             )
             
             if order:
-                # Calcular P&L
-                ticker = await self.broker.get_ticker(symbol)
-                exit_price = ticker['last']
+                # Calcular P&L con mercado actual
+                md = self.controller.get_market_data(symbol) or {}
+                exit_price = md.get('last') or md.get('price')
+                if exit_price is None:
+                    candles = md.get('candles') or md.get('klines') or md.get('data')
+                    if candles:
+                        last = candles[-1]
+                        if isinstance(last, dict):
+                            exit_price = float(last.get('close', 0))
+                        elif isinstance(last, (list, tuple)) and len(last) >= 5:
+                            exit_price = float(last[4])
+                if exit_price is None:
+                    exit_price = position['entry_price']
                 
                 if signal['action'] == 'BUY':
                     pnl = (exit_price - position['entry_price']) * position['quantity']
@@ -553,24 +459,31 @@ class AutoTrader:
     async def _update_balance(self):
         """Actualiza el balance actual"""
         try:
-            account = await self.broker.get_account_info()
-            self.current_balance = account.balance
+            balance_data = self.controller.get_balance() or {}
+            self.current_balance = float(balance_data.get('balance', self.current_balance))
         except Exception as e:
             logger.error(f"❌ Error actualizando balance: {e}")
     
     async def _get_market_data(self, symbol: str, limit: int = 100) -> Optional[pd.DataFrame]:
         """Obtiene datos históricos del mercado"""
         try:
-            candles = await self.broker.get_historical_data(
-                symbol=symbol,
-                timeframe=self.timeframe,
-                limit=limit
-            )
+            md = self.controller.get_market_data(symbol) or {}
+            candles = md.get('candles') or md.get('klines') or md.get('data') or md.get('history')
             
             if not candles:
                 return None
             
-            df = pd.DataFrame(candles)
+            # Normalizar diferentes formatos
+            if isinstance(candles[0], dict):
+                df = pd.DataFrame(candles)
+            else:
+                # Asumir formato kline [openTime, open, high, low, close, volume, ...]
+                cols = ['open_time','open','high','low','close','volume']
+                df = pd.DataFrame(candles, columns=cols + list(range(max(0, len(candles[0]) - len(cols)))))
+            # Convertir a floats
+            for col in ['open','high','low','close','volume']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
             return df
             
         except Exception as e:

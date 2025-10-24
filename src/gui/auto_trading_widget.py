@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont, QColor
 from loguru import logger
 from datetime import datetime
 import asyncio
+import threading
 
 
 class AutoTradingWidget(QWidget):
@@ -65,6 +66,16 @@ class AutoTradingWidget(QWidget):
         layout.addWidget(self.create_log_section())
         
         self.setLayout(layout)
+
+    def _run_async(self, coro):
+        """Ejecuta una corrutina en un hilo de fondo con su propio loop"""
+        def runner():
+            try:
+                asyncio.run(coro)
+            except Exception as e:
+                self.log(f"❌ Error de ejecución async: {e}")
+        t = threading.Thread(target=runner, daemon=True)
+        t.start()
     
     def create_status_section(self):
         """Crea sección de estado"""
@@ -482,16 +493,18 @@ class AutoTradingWidget(QWidget):
             # Crear AutoTrader
             from ..auto_trading import AutoTrader
             
-            if self.controller and self.controller.broker:
-                self.auto_trader = AutoTrader(self.controller.broker, config)
+            # Validar conexión del controlador (REST)
+            if self.controller and self.controller.is_connected:
+                # Pasar el controller al AutoTrader para usar la API REST
+                self.auto_trader = AutoTrader(self.controller, config)
                 
                 # Configurar callbacks
                 self.auto_trader.on_trade_callback = self.on_trade
                 self.auto_trader.on_signal_callback = self.on_signal
                 self.auto_trader.on_error_callback = self.on_error
                 
-                # Iniciar en thread separado
-                asyncio.create_task(self.auto_trader.start())
+                # Iniciar en hilo separado con su propio event loop
+                self._run_async(self.auto_trader.start())
                 
                 # Actualizar UI
                 self.start_btn.setEnabled(False)
@@ -503,7 +516,7 @@ class AutoTradingWidget(QWidget):
                 
                 self.log("✅ AutoTrader iniciado exitosamente")
             else:
-                self.log("❌ Error: Broker no conectado")
+                self.log("❌ Error: API/Controller no conectado. Conecta el broker en Settings primero.")
                 
         except Exception as e:
             self.log(f"❌ Error iniciando bot: {e}")
@@ -513,18 +526,18 @@ class AutoTradingWidget(QWidget):
         """Pausa el bot"""
         if self.auto_trader:
             if self.auto_trader.is_paused:
-                asyncio.create_task(self.auto_trader.resume())
+                self._run_async(self.auto_trader.resume())
                 self.pause_btn.setText("⏸️ Pausar")
                 self.log("▶️ Bot reanudado")
             else:
-                asyncio.create_task(self.auto_trader.pause())
+                self._run_async(self.auto_trader.pause())
                 self.pause_btn.setText("▶️ Reanudar")
                 self.log("⏸️ Bot pausado")
     
     def stop_bot(self):
         """Detiene el bot"""
         if self.auto_trader:
-            asyncio.create_task(self.auto_trader.stop())
+            self._run_async(self.auto_trader.stop())
             
             # Actualizar UI
             self.start_btn.setEnabled(True)
@@ -539,7 +552,7 @@ class AutoTradingWidget(QWidget):
     def close_all_positions(self):
         """Cierra todas las posiciones"""
         if self.auto_trader:
-            asyncio.create_task(self.auto_trader._close_all_positions())
+            self._run_async(self.auto_trader._close_all_positions())
             self.log("🔒 Cerrando todas las posiciones...")
     
     def update_status(self):
